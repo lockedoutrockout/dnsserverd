@@ -8,12 +8,12 @@
 # Windows? Not supported.                                                                   #
 #############################################################################################
 
-SOURCE_DIR="/usr/lib/templated"
-CONFIG_DIR="/etc/templated/config"
-RSC_DIR="/etc/templated/rsc"
-SYSTEMD_UNIT_TARGET="/etc/systemd/system/templated.service"
-SECURITY_POLICY_TARGET="/usr/share/dbus-1/system.d/org.templated.Template.conf"
-BIN_TARGET="/usr/bin/templated"
+SOURCE_DIR="/usr/lib/dnsserverd"
+CONFIG_DIR="/etc/dnsserverd/config"
+RSC_DIR="/etc/dnsserverd/rsc"
+SYSTEMD_UNIT_TARGET="/etc/systemd/system/dnsserverd.service"
+SECURITY_POLICY_TARGET="/usr/share/dbus-1/system.d/org.dnsserverd.DNSServer.conf"
+BIN_TARGET="/usr/bin/dnsserverd"
 
 # Make sure running as root
 if [[ "$EUID" -ne 0 ]]; then
@@ -28,19 +28,19 @@ mkdir -p "${RSC_DIR}"
 
 # Move script to source directory
 echo "Installing application files..."
-cp -r templated.py lib/ "${SOURCE_DIR}/"
+cp -r dnsserverd.py lib/ "${SOURCE_DIR}/"
 
 # Create the launcher
 echo "Creating launcher script..."
 cat > "${BIN_TARGET}" <<EOF
 #!/bin/sh
-exec /usr/bin/env python3 ${SOURCE_DIR}/templated.py "\$@"
+exec /usr/bin/env python3 ${SOURCE_DIR}/dnsserverd.py "\$@"
 EOF
 chmod +x "${BIN_TARGET}"
 
 # Move the configuration file
 echo "Copying configuration file..."
-cp config/templated.ini "${CONFIG_DIR}"
+cp config/dnsserverd.ini "${CONFIG_DIR}"
 
 # Copy other dependencies. Event handler scripts, etc.
 

@@ -9,19 +9,33 @@ import sys
 import subprocess
 from . import exceptions
 
-class Template(object):
-    """ Template backend
+class DNSServer(object):
+    """ DNS server backend
     """
     def __init__(self, config=None, logger=None):
         self.config = config
         self.logger = logger
         self.processes = {}
         self.state = "not running"
+        self.doh_blocklist = []
+        self.override_records = []
         self.settings = {
-            "Foo": self.config["TEMPLATE"]["foo"]
+            "UseTCP": self.config.getboolean("DNS", "use_tcp"),
+            "PrimaryUpstream": self.config["DNS"]["primary_upstream"],
+            "BackupUpstream": self.config["DNS"]["backup_upstream"],
+            "PrimaryUpstream": self.config["EXPLOITATION"]["dns_redirect_target_ip"],
+            "RedirectDNSTraffic": self.config.getboolean("EXPLOITATION", "redirect_dns_traffic"),
+            "BlockQUIC": self.config.getboolean("EXPLOITATION", "block_quic"),
+            "BlockDoH": self.config.getboolean("EXPLOITATION", "block_doh")
         }
         self._settings = {
-            "Foo": self.config["TEMPLATE"]["foo"]
+            "UseTCP": self.config.getboolean("DNS", "use_tcp"),
+            "PrimaryUpstream": self.config["DNS"]["primary_upstream"],
+            "BackupUpstream": self.config["DNS"]["backup_upstream"],
+            "PrimaryUpstream": self.config["EXPLOITATION"]["dns_redirect_target_ip"],
+            "RedirectDNSTraffic": self.config.getboolean("EXPLOITATION", "redirect_dns_traffic"),
+            "BlockQUIC": self.config.getboolean("EXPLOITATION", "block_quic"),
+            "BlockDoH": self.config.getboolean("EXPLOITATION", "block_doh")
         }
 
     def _Start(self):
@@ -124,3 +138,18 @@ class Template(object):
             self.state = "apply configuration failed"
             raise err_msg
         return None
+
+    def _UpdateDoHBlocklist(self, doh_blocklist):
+        """ Update the DoH host blocklist
+        """
+        pass
+
+    def _AddDNSOverride(self, scope, qtype, qname, rtype, rdata):
+        """ Add a new DNS override record
+        """
+        pass
+
+    def _RemoveDNSOverride(self, id_):
+        """ Remove an existing DNS override record
+        """
+        pass
