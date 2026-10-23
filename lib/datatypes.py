@@ -12,6 +12,18 @@ from dnslib.server import DNSServer as DNSLibDNSServer
 from dnslib.server import DNSHandler, BaseResolver
 from . import exceptions
 
+def dict_to_rr(record):
+    """ Convert a DNS record dictionary into an RR object
+    """
+    zr = (
+        f"{record['qname']} "
+        f"{record.get('ttl', 60)} "
+        f"IN "
+        f"{record['rtype']} "
+        f"{record['rdata']}"
+    )
+    return next(RR.fromZone(zr))
+
 class DNSResolver(object):
     """ Custom DNS resolver
     """
@@ -130,58 +142,27 @@ class DNSServer(object):
             "BlockQUIC": self.config.getboolean("EXPLOITATION", "block_quic"),
             "BlockDoH": self.config.getboolean("EXPLOITATION", "block_doh")
         }
-        self.resolver = DNSResolver(self.settings, config=self.config, logger=self.logger)
-        self.server = DNSLibDNSServer(self.resolver, port=int(self.config["DNS"]["lport"]), address=self.config["DNS"]["laddr"])
+        
+
+    def _search_override_records(self, query, record_type="any", search_param="id"):
+        """ Search override records
+        """
+        for item in self.override_records:
+            if item["rtype"] == record_type or record_type == "any":
+                if search_param == "id":
+                    if item["id"] == query:
+                        return item
 
     def _Start(self):
         """ Start the process
         """
-        def _template_subsystem_runner(logger, config):
-            """ Runner thread for template subsystem
-            """
-            logger.info(f"Started template subsystem runner thread")
-            sublogger = logging.getLogger("template_subsystem_runner")
-            slch = logging.StreamHandler()
-            log_level = int(config["LOGGING"]["log_level"])
-            if log_level == -1:
-                log_level = logging.DEBUG
-            elif log_level == 0:
-                log_level = logging.INFO
-            elif log_level == 1:
-                log_level = logging.ERROR
-            slch.setLevel(log_level)
-            slch.setFormatter(logging.Formatter("%(name)s - %(message)s"))
-            sublogger.addHandler(slch)
-            sublogger.info(f"Sublogger initialized for template subsystem subprocess")
-            p = subprocess.Popen(
-                [
-                    "some",
-                    "command",
-                    "here..."
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            self.processes["template_subsystem"] = p
-            for line in p.stdout:
-                sublogger.info(line.rstrip())
-            retcode = p.wait()
-            if retcode != 0:
-                logger.error(f"The template subsystem subprocess has exited with a non-zero return code of: {retcode}")
-            else:
-                logger.info(f"The template subsystem subprocess has exited")
-            return None
-            
         if self.state == "running":
-            raise exceptions.StateChangeError(f"Template is already running")
+            raise exceptions.StateChangeError(f"DNS server is already running")
         try:
             self.state = "starting"
-            threading.Thread(target=_template_subsystem_runner, args=(self.logger, self.config), daemon=True).start()
-            time.sleep(0.5)
-            if self.processes["template_subsystem"].returncode:
-                raise exceptions.ChildProcessExitedError(f"template subsystem exited with return code of: {self.processes['template_subsystem'].returncode}")
+            resolver = DNSResolver(self.settings, doh_blocklist, override_records, config=self.config, logger=self.logger)
+            self.server = DNSLibDNSServer(resolver, port=int(self.config["DNS"]["lport"]), address=self.config["DNS"]["laddr"])
+            self.server.start_thread()
         except Exception as err_msg:
             self.state = "startup failed"
             raise err_msg
@@ -194,16 +175,8 @@ class DNSServer(object):
         if self.state == "not running":
             raise exceptions.StateChangeError(f"Template is not running")
         try:
-            for process_name in self.processes.keys():
-                self.logger.debug(f"Stopping subprocess: {process_name}")
-                process = self.processes[process_name]
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                self.processes[process_name] = None
+            self.state = "stopping"
+            self.server.stop()
         except Exception as err_msg:
             self.state = "shutdown failed"
             raise err_msg
@@ -216,8 +189,8 @@ class DNSServer(object):
         if self.state == "not running":
             raise exceptions.StateChangeError(f"Process is not running")
         try:
-            self.stop()
-            self.start()
+            self._Stop()
+            self._Start()
         except Exception as err_msg:
             self.state = "restart failed"
             raise err_msg
@@ -251,7 +224,24 @@ class DNSServer(object):
     def _AddDNSOverride(self, scope, qtype, qname, rtype, rdata):
         """ Add a new DNS override record
         """
-        pass
+        try:
+            id_ = len(self.override_records) + 1
+            while id_ in self._search_override_records(id_, record_type="any", search_param="id"):
+                id_ += 1
+            r = {
+                "id": id_,
+                "scope": scope,
+                "qtype": qtype,
+                "qname": qname,
+                "rtype": rtype,
+                "rdata": rdata,
+            }
+            rr = dict_to_rr(r)
+            r["rr"] = rr
+            self.override_records.append(r)
+        except Exception as err_msg:
+            raise err_msg
+        return id_
 
     def _RemoveDNSOverride(self, id_):
         """ Remove an existing DNS override record
