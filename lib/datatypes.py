@@ -30,7 +30,7 @@ class DNSResolver(object):
     def __init__(self, settings, doh_blocklist, override_records, config=None, logger=None):
         self.config = config
         self.logger = logger
-        self.settings = None
+        self.settings = settings
         self.doh_blocklist = doh_blocklist
         self.override_records = override_records
         if os.path.isfile(self.config["ZONE"]["zone_file"]):
@@ -115,7 +115,7 @@ class DNSServer(object):
             "UseTCP": self.config.getboolean("DNS", "use_tcp"),
             "PrimaryUpstream": self.config["DNS"]["primary_upstream"],
             "BackupUpstream": self.config["DNS"]["backup_upstream"],
-            "PrimaryUpstream": self.config["EXPLOITATION"]["dns_redirect_target_ip"],
+            "DNSRedirectTargetIP": self.config["EXPLOITATION"]["dns_redirect_target_ip"],
             "RedirectDNSTraffic": self.config.getboolean("EXPLOITATION", "redirect_dns_traffic"),
             "BlockQUIC": self.config.getboolean("EXPLOITATION", "block_quic"),
             "BlockDoH": self.config.getboolean("EXPLOITATION", "block_doh")
@@ -124,7 +124,7 @@ class DNSServer(object):
             "UseTCP": self.config.getboolean("DNS", "use_tcp"),
             "PrimaryUpstream": self.config["DNS"]["primary_upstream"],
             "BackupUpstream": self.config["DNS"]["backup_upstream"],
-            "PrimaryUpstream": self.config["EXPLOITATION"]["dns_redirect_target_ip"],
+            "DNSRedirectTargetIP": self.config["EXPLOITATION"]["dns_redirect_target_ip"],
             "RedirectDNSTraffic": self.config.getboolean("EXPLOITATION", "redirect_dns_traffic"),
             "BlockQUIC": self.config.getboolean("EXPLOITATION", "block_quic"),
             "BlockDoH": self.config.getboolean("EXPLOITATION", "block_doh")
@@ -147,7 +147,13 @@ class DNSServer(object):
             raise exceptions.StateChangeError(f"DNS server is already running")
         try:
             self.state = "starting"
-            resolver = DNSResolver(self.settings, doh_blocklist, override_records, config=self.config, logger=self.logger)
+            resolver = DNSResolver(
+                self.settings,
+                self.doh_blocklist,
+                self.override_records,
+                config=self.config,
+                logger=self.logger
+            )
             self.server = DNSLibDNSServer(resolver, port=int(self.config["DNS"]["lport"]), address=self.config["DNS"]["laddr"])
             self.server.start_thread()
         except Exception as err_msg:
@@ -203,7 +209,8 @@ class DNSServer(object):
                 if host in updated:
                     continue
                 updated.append(host)
-            self.doh_blocklist = updated
+            self.doh_blocklist.clear()
+            self.doh_blocklist.extend(updated)
         except Exception as err_msg:
             raise err_msg
         return None
@@ -213,7 +220,7 @@ class DNSServer(object):
         """
         try:
             id_ = len(self.override_records) + 1
-            while id_ in self._search_override_records(id_, record_type="any", search_param="id"):
+            while self._search_override_records(id_, record_type="any", search_param="id") is not None:
                 id_ += 1
             r = {
                 "id": id_,
