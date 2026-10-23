@@ -142,7 +142,16 @@ class DNSServer(object):
     def _UpdateDoHBlocklist(self, doh_blocklist):
         """ Update the DoH host blocklist
         """
-        pass
+        try:
+            updated = []
+            for host in doh_blocklist:
+                if host in updated:
+                    continue
+                updated.append(host)
+            self.doh_blocklist = updated
+        except Exception as err_msg:
+            raise err_msg
+        return None
 
     def _AddDNSOverride(self, scope, qtype, qname, rtype, rdata):
         """ Add a new DNS override record
