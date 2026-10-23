@@ -37,20 +37,6 @@ class DNSResolver(object):
             with open(self.config["ZONE"]["zone_file"], "r") as fd:
                 zp = ZoneParser(fd)
                 self.zone_records = list(zp.parse())
-                
-
-    def _search_override_records(self, query, record_type="any", search_param="id"):
-        """ Search DNS override records
-        """
-        rvals = []
-        for item in self.override_records:
-            if record_type == "any" or item["qtype"] == record_type:
-                if search_param == "id":
-                    if int(query) == item[id]:
-                        rvals.append(item)
-                elif search_param == "qname":
-                    if que
-                    
 
     def resolve(self, request, handler):
         """ Resolve DNS queries
@@ -83,7 +69,8 @@ class DNSResolver(object):
         if self.override_records:
             exact_matches = []
             wildcard_matches = []
-            for rr in self.override_records:
+            for record in self.override_records:
+                rr = record["rr"]
                 if qtype not in (QTYPE[rr.rtype], "ANY"):
                     continue
                 if qname == normalize(str(rr.rname)):
@@ -246,4 +233,11 @@ class DNSServer(object):
     def _RemoveDNSOverride(self, id_):
         """ Remove an existing DNS override record
         """
-        pass
+        if not self._search_override_records(id_, record_type="any", search_param="id"):
+            raise exceptions.OverrideRecordError(f"No override record with ID {id_} exists")
+        try:
+            r = self._search_override_records(id_, record_type="any", search_param="id")
+            self.override_records.remove(r)
+        except Exception as err_msg:
+            raise err_msg
+        return None
