@@ -38,25 +38,25 @@ class DNSResolver(BaseResolver):
         """ Resolves DNS queries received by the server and returns a response
         """
 
-        def normalize(name):
-            """ Domain name normalization
-            """
-            return name.lower().rstrip(".") + "."
+            def normalize(name):
+                """ Domain name normalization
+                """
+                return name.lower().rstrip(".") + "."
 
-        def wildcard_match(qname, rname):
-            """ Wildcard record matching
-            """
-            if not rname.startswith("*."):
-                return False
-            suffix = rname[2:]
-            if not qname.endswith(suffix):
-                return False
-            qlabels = qname.rstrip(".").split(".")
-            slabels = suffix.rstrip(".").split(".")
-            if len(qlabels) == len(slabels) + 1:
-                return True
-            else:
-                return False
+            def wildcard_match(qname, rname):
+                """ Wildcard record matching
+                """
+                if not rname.startswith("*."):
+                    return False
+                suffix = rname[2:]
+                if not qname.endswith(suffix):
+                    return False
+                qlabels = qname.rstrip(".").split(".")
+                slabels = suffix.rstrip(".").split(".")
+                if len(qlabels) == len(slabels) + 1:
+                    return True
+                else:
+                    return False
 
         # Get query name and type, along with client IP, then initialize an empty reply we will send back
         # once the appropriate response is determined

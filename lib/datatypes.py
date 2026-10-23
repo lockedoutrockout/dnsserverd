@@ -7,7 +7,100 @@ Custom datatype definitions
 import os
 import sys
 import subprocess
+from dnslib import DNSRecord, QTYPE, RR, A, ZoneParser
+from dnslib.server import DNSServer as DNSLibDNSServer
+from dnslib.server import DNSHandler, BaseResolver
 from . import exceptions
+
+class DNSResolver(object):
+    """ Custom DNS resolver
+    """
+    def __init__(self, settings, doh_blocklist, override_records, config=None, logger=None):
+        self.config = config
+        self.logger = logger
+        self.settings = None
+        self.doh_blocklist = doh_blocklist
+        self.override_records = override_records
+        if os.path.isfile(self.config["ZONE"]["zone_file"]):
+            with open(self.config["ZONE"]["zone_file"], "r") as fd:
+                zp = ZoneParser(fd)
+                self.zone_records = list(zp.parse())
+                
+
+    def _search_override_records(self, query, record_type="any", search_param="id"):
+        """ Search DNS override records
+        """
+        rvals = []
+        for item in self.override_records:
+            if record_type == "any" or item["qtype"] == record_type:
+                if search_param == "id":
+                    if int(query) == item[id]:
+                        rvals.append(item)
+                elif search_param == "qname":
+                    if que
+                    
+
+    def resolve(self, request, handler):
+        """ Resolve DNS queries
+        """
+        def normalize(name):
+            """ Domain name normalization
+            """
+            return name.lower().rstrip(".") + "."
+
+        def wildcard_match(qname, rname):
+            """ Wildcard record matching
+            """
+            if not rname.startswith("*."):
+                return False
+            suffix = rname[2:]
+            if not qname.endswith(suffix):
+                return False
+            qlabels = qname.rstrip(".").split(".")
+            slabels = suffix.rstrip(".").split(".")
+            if len(qlabels) == len(slabels) + 1:
+                return True
+            else:
+                return False
+
+        qname = normalize(str(request.q.qname).rstrip("."))
+        qtype = QTYPE[request.q.qtype]
+        client_ip = handler.client_address[0]
+        reply = request.reply()
+
+        if self.override_records:
+            exact_matches = []
+            wildcard_matches = []
+            for rr in self.override_records:
+                if qtype not in (QTYPE[rr.rtype], "ANY"):
+                    continue
+                if qname == normalize(str(rr.rname)):
+                    exact_matches.append(rr)
+                elif wildcard_match(qname, normalize(str(rr.rname))):
+                    wildcard_matches.append(rr)
+            matches = exact_matches or wildcard_matches
+            if matches:
+                for rr in matches:
+                    reply.add_answer(rr)
+                return reply
+
+        if self.zone_records:
+            for rr in self.zone_records:
+                if qtype in (QTYPE[rr.rtype], "ANY") and qname == normalize(str(rr.rname)):
+                    reply.add_answer(rr)
+                    reply.header.aa = 1
+                    return reply
+
+        for upstream in (self.settings["PrimaryUpstream"], self.settings["BackupUpstream"]):
+            try:
+                upstream_response = request.send(upstream, 53, tcp=False)
+                return DNSRecord.parse(upstream_response)
+            except Exception as err_msg:
+                self.logger.error(f"Got error resolving query through upstream server: {err_msg}")\
+                continue
+
+        
+        
 
 class DNSServer(object):
     """ DNS server backend
@@ -37,6 +130,8 @@ class DNSServer(object):
             "BlockQUIC": self.config.getboolean("EXPLOITATION", "block_quic"),
             "BlockDoH": self.config.getboolean("EXPLOITATION", "block_doh")
         }
+        self.resolver = DNSResolver(self.settings, config=self.config, logger=self.logger)
+        self.server = DNSLibDNSServer(self.resolver, port=int(self.config["DNS"]["lport"]), address=self.config["DNS"]["laddr"])
 
     def _Start(self):
         """ Start the process
