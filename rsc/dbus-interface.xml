@@ -8,15 +8,25 @@
         <method name="UpdateDoHBlocklist">
             <arg name="doh_blocklist" type="as" direction="in"/>
         </method>
-        <method name="AddDNSOverride">
+        <method name="ImportZoneFile">
+            <arg name="infile" type="s" direction="in"/>
+            <arg name="category" type="s" direction="in"/>
+            <arg name="ids" type="ai" direction="out"/>
+        </method>
+        <method name="ExportZoneFile">
+            <arg name="outfile" type="s" direction="in"/>
+            <arg name="category" type="s" direction="in"/>
+        </method>
+        <method name="AddDNSRecord">
+            <arg name="category" type="s" direction="in"/>
             <arg name="scope" type="s" direction="in"/>
-            <arg name="qtype" type="s" direction="in"/>
-            <arg name="qname" type="s" direction="in"/>
             <arg name="rtype" type="s" direction="in"/>
+            <arg name="rname" type="s" direction="in"/>
             <arg name="rdata" type="s" direction="in"/>
+            <arg name="ttl" type="i" direction="in"/>
             <arg name="id" type="i" direction="out"/>
         </method>
-        <method name="RemoveDNSOverride">
+        <method name="RemoveDNSRecord">
             <arg name="id" type="i" direction="in"/>
         </method>
         
@@ -48,6 +58,14 @@
         <signal name="ConfigurationApplied">
             <arg type="a{sv}" name="old_config"/>
             <arg type="a{sv}" name="new_config"/>
+        </signal>
+        <signal name="DoHBlocklistUpdated">
+            <arg type="as" name="old_blocklist"/>
+            <arg type="as" name="new_blocklist"/>
+        </signal>
+        <signal name="OverrideRecordsUpdated">
+            <arg type="s" name="action"/>
+            <arg type="a{sv}" name="override_record"/>
         </signal>
     </interface>
 </node>

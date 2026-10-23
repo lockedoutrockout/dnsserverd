@@ -12,31 +12,142 @@ from dnslib.server import DNSServer as DNSLibDNSServer
 from dnslib.server import DNSHandler, BaseResolver
 from . import exceptions
 
-def dict_to_rr(record):
-    """ Convert a DNS record dictionary into an RR object
+"""
+Override Record Dictionary Structure:
+
+record = {
+    "id": 1, # Unique identifier for the record
+    "category": "override", # Category. States whether the record is an override or a zone record
+    "scope": "global", # Scope. States what this record is applicable to. Can be 'global' for a globally scoped record or an IP address for a specific client
+    "rr": <RR object at...>, # An active RR object instance built from the record
+    "rtype": "A", # States what type of DNS record this is
+    "rname": "example.com", # Specifies the domain/host name to be overridden
+    "rdata": "192.168.0.1", # Contains the falsified data the server will respond to the query with
+    "ttl": 60 # Length of time which the response remains valid for
+}
+"""
+
+def dict_to_rr(d):
+    """ Convert a dictionary into an RR object
     """
-    zr = (
-        f"{record['qname']} "
-        f"{record.get('ttl', 60)} "
+    c = (
+        f"{d['qname']} "
+        f"{d.get('ttl', 60)} "
         f"IN "
-        f"{record['rtype']} "
-        f"{record['rdata']}"
+        f"{d['rtype']} "
+        f"{d['rdata']}"
     )
-    return next(RR.fromZone(zr))
+    return next(RR.fromZone(c))
+
+class DNSRecordList(object):
+    """ A categorized and sorted master list of DNS records
+    """
+    def __init__(self):
+        self.records = {
+            "all": [],
+            "by_category": {
+                "zone": [],
+                "override": []
+            }
+            "by_scope": {
+                "global": []
+            },
+            "by_rtype": {
+                "SOA": [],
+                "NS": [],
+                "A": [],
+                "AAAA": [],
+                "CNAME": [],
+                "MX": [],
+                "TEXT": []
+            },
+            "by_rname": {},
+            "by_rdata": {},
+            "by_ttl": {}
+        }
+
+    def search_by_id(self, id_):
+        """ Get record by its ID
+        """
+        for record in self.records["all"]:
+            if record["id"] == id_:
+                return record
+        return None
+
+    def import_zone_file(self, infile, category):
+        """ Import records from a DNS zonefile
+        """
+        raise NotImplementedError
+
+    def export_zone_file(self, outfile, category):
+        """ Export records to a DNS zonefile
+        """
+        raise NotImplementedError
+
+    def add_record(self, category, scope, rtype, rname, rdata, ttl):
+        """ Adds a new record
+        """
+        id_ = len(self.records) + 1
+        while self.search_by_id(id_) is not None:
+            id_ += 1
+        record = {
+            "id": id_,
+            "category": category,
+            "scope": scope,
+            "rtype": rtype,
+            "rname": rname,
+            "rdata": rdata
+        }
+        rr = dict_to_rr(record)
+        record["rr"] = rr
+
+        self.records["all"].append(record)
+        if record["category"] not in self.records["by_category"].keys():
+            self.records["by_category"][record["category"]] = []
+        self.records["by_category"][record["category"]].append(record)
+        if record["scope"] not in self.records["by_scope"].keys():
+            self.records["by_scope"][record["scope"]] = []
+        self.records["by_scope"][record["scope"]].append(record)
+        if record["rtype"] not in self.records["by_rtype"].keys():
+            self.records["by_rtype"][record["rtype"]] = []
+        self.records["by_rtype"][record["rtype"]].append(record)
+        if record["rname"] not in self.records["by_rname"].keys():
+            self.records["by_rname"][record["rname"]] = []
+        self.records["by_rname"][record["rname"]].append(record)
+        if record["rdata"] not in self.records["by_rdata"].keys():
+            self.records["by_rdata"][record["rdata"]] = []
+        self.records["by_rdata"][record["rdata"]].append(record)
+        if record["ttl"] not in self.records["by_ttl"].keys():
+            self.records["by_ttl"][record["ttl"]] = []
+        self.records["by_ttl"][record["ttl"]].append(record)
+
+        return record
+
+    def remove_record(self, id_):
+        """ Remove an existing record
+        """
+        if not self.search_by_id(id_):
+            raise exceptions.RecordNotFoundError(f"Could not find a DNS record with ID of: {id_}")
+            
+        record = self.search_by_id(id_)
+        self.records["all"].remove(record)
+        self.records["by_category"][record["category"]].remove(record)
+        self.records["by_scope"][record["scope"]].remove(record)
+        self.records["by_rtype"][record["rtype"]].remove(record)
+        self.records["by_rname"][record["rname"]].remove(record)
+        self.records["by_rdata"][record["rdata"]].remove(record)
+        self.records["by_ttl"][record["ttl"]].remove(record)
+
+        return record
 
 class DNSResolver(object):
     """ Custom DNS resolver
     """
-    def __init__(self, settings, doh_blocklist, override_records, config=None, logger=None):
+    def __init__(self, settings, dns_records, config=None, logger=None):
         self.config = config
         self.logger = logger
         self.settings = settings
-        self.doh_blocklist = doh_blocklist
-        self.override_records = override_records
-        if os.path.isfile(self.config["ZONE"]["zone_file"]):
-            with open(self.config["ZONE"]["zone_file"], "r") as fd:
-                zp = ZoneParser(fd)
-                self.zone_records = list(zp.parse())
+        self.dns_records = dns_records
 
     def resolve(self, request, handler):
         """ Resolve DNS queries
@@ -66,10 +177,16 @@ class DNSResolver(object):
         client_ip = handler.client_address[0]
         reply = request.reply()
 
-        if self.override_records:
+        # Resolve with override records
+        if self.dns_records["by_category"]["override"]:
             exact_matches = []
             wildcard_matches = []
-            for record in self.override_records:
+            matching_records = []
+            for record in self.dns_records["by_category"]["override"]:
+                # Continue to the next record unless record is globally scoped or scoped to the client's IP
+                if record["scope"] != "global":
+                    if record["scope"] != client_ip:
+                        continue
                 rr = record["rr"]
                 if qtype not in (QTYPE[rr.rtype], "ANY"):
                     continue
@@ -77,22 +194,28 @@ class DNSResolver(object):
                     exact_matches.append(rr)
                 elif wildcard_match(qname, normalize(str(rr.rname))):
                     wildcard_matches.append(rr)
+                matching_records.append(record["id"])
             matches = exact_matches or wildcard_matches
             if matches:
                 for rr in matches:
                     reply.add_answer(rr)
+                self.logger.info(f"Responding to query for {qname} from {client_ip} with response from override records")
                 return reply
 
-        if self.zone_records:
-            for rr in self.zone_records:
+        # Resolve with zone records
+        if self.dns_records["by_category"]["zone"]:
+            for rr in self.dns_records["by_category"]["zone"]:
                 if qtype in (QTYPE[rr.rtype], "ANY") and qname == normalize(str(rr.rname)):
                     reply.add_answer(rr)
                     reply.header.aa = 1
+                    self.logger.info(f"Responding to query for {qname} from {client_ip} with response from zone records")
                     return reply
 
+        # Resolve with upstream resolvers
         for upstream in (self.settings["PrimaryUpstream"], self.settings["BackupUpstream"]):
             try:
                 upstream_response = request.send(upstream, 53, tcp=False)
+                self.logger.info(f"Responding to query for {qname} from {client_ip} with response from upstream resolver")
                 return DNSRecord.parse(upstream_response)
             except Exception as err_msg:
                 self.logger.error(f"Got error resolving query through upstream server: {err_msg}")\
@@ -109,8 +232,8 @@ class DNSServer(object):
         self.logger = logger
         self.processes = {}
         self.state = "not running"
-        self.doh_blocklist = []
-        self.override_records = []
+        self.dns_records = DNSRecordList()
+        self.doh_blocklist = [] 
         self.settings = {
             "UseTCP": self.config.getboolean("DNS", "use_tcp"),
             "PrimaryUpstream": self.config["DNS"]["primary_upstream"],
@@ -129,16 +252,6 @@ class DNSServer(object):
             "BlockQUIC": self.config.getboolean("EXPLOITATION", "block_quic"),
             "BlockDoH": self.config.getboolean("EXPLOITATION", "block_doh")
         }
-        
-
-    def _search_override_records(self, query, record_type="any", search_param="id"):
-        """ Search override records
-        """
-        for item in self.override_records:
-            if item["rtype"] == record_type or record_type == "any":
-                if search_param == "id":
-                    if item["id"] == query:
-                        return item
 
     def _Start(self):
         """ Start the process
@@ -149,8 +262,7 @@ class DNSServer(object):
             self.state = "starting"
             resolver = DNSResolver(
                 self.settings,
-                self.doh_blocklist,
-                self.override_records,
+                self.dns_records,
                 config=self.config,
                 logger=self.logger
             )
@@ -215,36 +327,38 @@ class DNSServer(object):
             raise err_msg
         return None
 
-    def _AddDNSOverride(self, scope, qtype, qname, rtype, rdata):
+    def _ImportZoneFile(self, infile, category):
+        """ Import DNS records from a zonefile
+        """
+        try:
+            ids = self.dns_records.import_zone_file(infile, category)
+        except Exception as err_msg:
+            raise err_msg
+        return ids
+
+    def _ExportZoneFile(self, outfile, category):
+        """ Export DNS records to a zonefile
+        """
+        try:
+            self.dns_records.export_zone_file(outfile, category)
+        except Exception as err_msg:
+            raise err_msg
+        return None
+
+    def _AddDNSRecord(self, category, scope, rtype, rname, rdata, ttl):
         """ Add a new DNS override record
         """
         try:
-            id_ = len(self.override_records) + 1
-            while self._search_override_records(id_, record_type="any", search_param="id") is not None:
-                id_ += 1
-            r = {
-                "id": id_,
-                "scope": scope,
-                "qtype": qtype,
-                "qname": qname,
-                "rtype": rtype,
-                "rdata": rdata,
-            }
-            rr = dict_to_rr(r)
-            r["rr"] = rr
-            self.override_records.append(r)
+            id_ = self.dns_records.add_record(category, scope, rtype, rname, rdata, ttl)
         except Exception as err_msg:
             raise err_msg
         return id_
 
-    def _RemoveDNSOverride(self, id_):
+    def _RemoveDNSRecord(self, id_):
         """ Remove an existing DNS override record
         """
-        if not self._search_override_records(id_, record_type="any", search_param="id"):
-            raise exceptions.OverrideRecordError(f"No override record with ID {id_} exists")
         try:
-            r = self._search_override_records(id_, record_type="any", search_param="id")
-            self.override_records.remove(r)
+            self.dns_records.remove_record(id_)
         except Exception as err_msg:
             raise err_msg
         return None

@@ -29,15 +29,25 @@ INTERFACE_XML = """
         <method name="UpdateDoHBlocklist">
             <arg name="doh_blocklist" type="as" direction="in"/>
         </method>
-        <method name="AddDNSOverride">
+        <method name="ImportZoneFile">
+            <arg name="infile" type="s" direction="in"/>
+            <arg name="category" type="s" direction="in"/>
+            <arg name="ids" type="ai" direction="out"/>
+        </method>
+        <method name="ExportZoneFile">
+            <arg name="outfile" type="s" direction="in"/>
+            <arg name="category" type="s" direction="in"/>
+        </method>
+        <method name="AddDNSRecord">
+            <arg name="category" type="s" direction="in"/>
             <arg name="scope" type="s" direction="in"/>
-            <arg name="qtype" type="s" direction="in"/>
-            <arg name="qname" type="s" direction="in"/>
             <arg name="rtype" type="s" direction="in"/>
+            <arg name="rname" type="s" direction="in"/>
             <arg name="rdata" type="s" direction="in"/>
+            <arg name="ttl" type="i" direction="in"/>
             <arg name="id" type="i" direction="out"/>
         </method>
-        <method name="RemoveDNSOverride">
+        <method name="RemoveDNSRecord">
             <arg name="id" type="i" direction="in"/>
         </method>
         
@@ -80,7 +90,6 @@ INTERFACE_XML = """
         </signal>
     </interface>
 </node>
-
 """
 
 def dict_to_dbus_asv(d):
@@ -174,8 +183,18 @@ class DNSServerService(datatypes.DNSServer):
             raise err_msg
         return None
 
-    def AddDNSOverride(self, scope, qtype, qname, rtype, rdata):
-        """ Add a new DNS override record
+    def ImportZoneFile(self, infile, category):
+        """ Import DNS records of the specified category from a zonefile
+        """
+        pass
+
+    def ExportZoneFile(self, outfile, category):
+        """ Export the records for a given category to a zonefile
+        """
+        pass
+
+    def AddDNSRecord(self, category, scope, rtype, rname, rdata, ttl):
+        """ Add a new DNS record
         """
         self.logger.info(f"DBus API got call to AddDNSOverride")
         try:
@@ -186,8 +205,8 @@ class DNSServerService(datatypes.DNSServer):
             raise err_msg
         return record[0]
 
-    def RemoveDNSOverride(self, id_):
-        """ Remove an existing DNS override record
+    def RemoveDNSRecord(self, id_):
+        """ Remove an existing DNS record
         """
         self.logger.info(f"DBus API got call to RemoveDNSOverride")
         try:
