@@ -1,0 +1,53 @@
+<node>
+    <interface name="com.dnsserverd.DNSServer">
+        <!-- Methods -->
+        <method name="Start"/>
+        <method name="Stop"/>
+        <method name="Restart"/>
+        <method name="ApplyConfiguration"/>
+        <method name="UpdateDoHBlocklist">
+            <arg name="doh_blocklist" type="as" direction="in"/>
+        </method>
+        <method name="AddDNSOverride">
+            <arg name="scope" type="s" direction="in"/>
+            <arg name="qtype" type="s" direction="in"/>
+            <arg name="qname" type="s" direction="in"/>
+            <arg name="rtype" type="s" direction="in"/>
+            <arg name="rdata" type="s" direction="in"/>
+            <arg name="id" type="i" direction="out"/>
+        </method>
+        <method name="RemoveDNSOverride">
+            <arg name="id" type="i" direction="in"/>
+        </method>
+        
+
+        <!-- Properties -->
+        <!-- Read Only -->
+        <property name="State" type="s" access="read"/>
+        <property name="OverrideRecords" type="aa{sv}" access="read"/>
+        <property name="DoHBlocklist" type="as" access="read"/>
+        <!-- Read/Write -->
+        <property name="UseTCP" type="b" access="readwrite"/>
+        <property name="PrimaryUpstream" type="s" access="readwrite"/>
+        <property name="BackupUpstream" type="s" access="readwrite"/>
+        <property name="DNSRedirectTargetIP" type="s" access="readwrite"/>
+        <property name="RedirectDNSTraffic" type="b" access="readwrite"/>
+        <property name="BlockQUIC" type="b" access="readwrite"/>
+        <property name="BlockDoH" type="b" access="readwrite"/>
+
+        <!-- Signals -->
+        <signal name="StateChanged">
+            <arg type="s" name="old_state"/>
+            <arg type="s" name="new_state"/>
+        </signal>
+        <signal name="ConfigurationChanged">
+            <arg type="s" name="setting"/>
+            <arg type="s" name="old_value"/>
+            <arg type="s" name="new_value"/>
+        </signal>
+        <signal name="ConfigurationApplied">
+            <arg type="a{sv}" name="old_config"/>
+            <arg type="a{sv}" name="new_config"/>
+        </signal>
+    </interface>
+</node>

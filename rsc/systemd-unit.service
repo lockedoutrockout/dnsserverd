@@ -1,0 +1,15 @@
+[Unit]
+Description=DNS server daemon
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=com.dnsserverd.DNSServer
+ExecStart=/usr/bin/dnsserverd /etc/dnsserverd/config/dnsserverd.ini
+Restart=on-failure
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
