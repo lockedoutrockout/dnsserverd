@@ -27,7 +27,7 @@ INTERFACE_XML = """
         <method name="Restart"/>
         <method name="ApplyConfiguration"/>
         <method name="UpdateDoHBlocklist">
-            <arg name="doh_blocklist" type="as" direction="in"/>
+            <arg name="hosts" type="as" direction="in"/>
         </method>
         <method name="ImportZoneFile">
             <arg name="infile" type="s" direction="in"/>
@@ -174,7 +174,7 @@ class DNSServerService(datatypes.DNSServer):
             self.logger.error(f"DBus API encountered an exception during call to Apply: {err_msg}")
         return None
 
-    def UpdateDoHBlocklist(self, doh_blocklist):
+    def UpdateDoHBlocklist(self, hosts):
         """ Update the DNS-over-HTTPS host blocklist
         """
         self.logger.info(f"DBus API got call to UpdateDoHBlocklist")
