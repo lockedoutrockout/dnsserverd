@@ -182,8 +182,6 @@ class DNSServerService(datatypes.DNSServer):
         try:
             _old = self.doh_blocklist.doh_blocklist
             self._UpdateDoHBlocklist(hosts, append)
-            if self.doh_blocklist.is_updating:
-                self.doh_blocklist.update_thread.join()
             self.DoHBlocklistUpdated(_old, self.doh_blocklist.doh_blocklist)
         except Exception as err_msg:
             self.logger.error(f"DBus API encountered an exception during call to UpdateDoHBlocklist: {err_msg}")
@@ -199,7 +197,7 @@ class DNSServerService(datatypes.DNSServer):
         except Exception as err_msg:
             self.logger.error(f"DBus API encountered an exception during call to ImportZoneFile: {err_msg}")
             raise err_msg
-        return None
+        return ids
             
 
     def ExportZoneFile(self, outfile, category, scope):
@@ -207,7 +205,7 @@ class DNSServerService(datatypes.DNSServer):
         """
         self.logger.info(f"DBus API got call to ExportZoneFile")
         try:
-            self.dns_records.export_zone_file(infile, category, scope)
+            self.dns_records.export_zone_file(outfile, category, scope)
         except Exception as err_msg:
             self.logger.error(f"DBus API encountered an exception during call to ExportZoneFile: {err_msg}")
             raise err_msg
@@ -252,9 +250,7 @@ class DNSServerService(datatypes.DNSServer):
 
     @property
     def DoHBlocklist(self):
-        if self.doh_blocklist.is_updating:
-            self.doh_blocklist.update_thread.join()
-        return self.doh_blocklist.
+        return self.doh_blocklist.doh_blocklist
 
     @property
     def UseTCP(self):

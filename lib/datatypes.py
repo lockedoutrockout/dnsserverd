@@ -66,8 +66,6 @@ class DoHBlocklist(object):
     """
     def __init__(self, config=None, logger=None):
         self.doh_blocklist = []
-        self.update_thread = None
-        self.is_updating = False
         self.doh_hosts_file = self.config["EXPLOITATION"]["doh_hosts_filepath"]
         if "~" in self.doh_hosts_file:
             self.doh_hosts_file = os.path.expanduser(self.doh_hosts_file)
@@ -77,32 +75,21 @@ class DoHBlocklist(object):
                 for line in fd.readlines():
                     hosts.append(line.strip())
             self.update_doh_blocklist(hosts)
-            if self.is_updating:
-                self.update_thread.join()
         else:
             Path(self.doh_hosts_file).touch()
 
     def update_doh_blocklist(self, hosts, append):
         """ Update the DoH blocklist
         """
-        def _update_thread(hosts):
-            """ DoH blocklist updater thread
-            """
-            self.is_updating = True
-            doh_blocklist = []
-            for host in hosts:
-                try:
-                    doh_blocklist.append((host, resolve_host(host)))
-                except Exception as err_msg:
-                    raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while updating the DoH blocklist") from err_msg
-            if not append:
-                self.doh_blocklist.clear()
-            self.doh_blocklist.extend(doh_blocklist)
-            self.is_updating = False
-            return None
-
-        self.update_thread = threading.Thread(target=_update_thread, args=(hosts,), daemon=True)
-        self.update_thread.start()
+        doh_blocklist = []
+        for host in hosts:
+            try:
+                doh_blocklist.append((host, resolve_host(host)))
+            except Exception as err_msg:
+                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while updating the DoH blocklist") from err_msg
+        if not append:
+            self.doh_blocklist.clear()
+        self.doh_blocklist.extend(doh_blocklist)
         return None
 
 class DNSRecordList(object):
@@ -275,10 +262,11 @@ class DNSFirewall(object):
     """ Handles tasks related to enforcing use of the DNS server
     by network clients
     """
-    def __init__(self, settings, config=None, logger=None):
+    def __init__(self, settings, doh_blocklist, config=None, logger=None):
         self.config = config
         self.logger = logger
         self.settings = settings
+        self.doh_blocklist = doh_blocklist
         self.dns_redirection(self.settings["RedirectDNSTraffic"])
         self.quic_blocking(self.settings["BlockQUIC"])
         self.doh_blocking(self.settings["BlockDoH"])
@@ -418,7 +406,7 @@ class DNSFirewall(object):
                     "doh_blocklist",
                     "hash:ip"
                 ])
-                for host in self.doh_blocklist:
+                for host in self.doh_blocklist.doh_blocklist:
                     subprocess.run([
                         "ipset",
                         "add",
@@ -562,7 +550,7 @@ class DNSServer(object):
         self.processes = {}
         self.state = "not running"
         self.dns_records = DNSRecordList(config=self.config, logger=self.logger)
-        self.doh_blocklist = DoHBlocklist(config=self.config, logger=self.logger) 
+        self.doh_blocklist = DoHBlocklist(self.settings, self.doh_blocklist, config=self.config, logger=self.logger) 
         self.settings = {
             "UseTCP": self.config.getboolean("SERVER", "use_tcp"),
             "PrimaryUpstream": self.config["DNS"]["primary_upstream"],
