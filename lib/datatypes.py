@@ -39,6 +39,18 @@ def dict_to_rr(d):
     )
     return next(RR.fromZone(c))
 
+def rr_to_dict(r):
+    """ Convert an RR object into a dictionary
+    """
+    c = {
+        "rclass": r.rclass,
+        "rtype": QTYPE[r.rtype],
+        "rname": str(r.rname),
+        "rdata": r.rdata,
+        "ttl": r.ttl
+    }
+    return c
+
 class DNSRecordList(object):
     """ A categorized and sorted master list of DNS records
     """
@@ -48,7 +60,7 @@ class DNSRecordList(object):
             "by_category": {
                 "zone": [],
                 "override": []
-            }
+            },
             "by_scope": {
                 "global": []
             },
@@ -74,10 +86,29 @@ class DNSRecordList(object):
                 return record
         return None
 
-    def import_zone_file(self, infile, category):
+    def import_zone_file(self, infile, category, scope="global"):
         """ Import records from a DNS zonefile
         """
-        raise NotImplementedError
+        if not os.path.isfile(infile):
+            raise exceptions.DNSRecordListError(f"Cannot import records from zonefile! File does not exist: {infile}")
+        if category not in ("zone", "override"):
+            raise exceptions.DNSRecordListError(f"Cannot import records from zonefile! Invalid category: {category}")
+
+        with open(infile, "r") as fd:
+            try:
+                zone_parser = ZoneParser(fd)
+                rr_records = list(zone_parser.parse())
+            except Exception as err_msg:
+                raise exceptions.DNSRecordListError(f"Encountered an unexpected exception while importing records from zonefile: {infile}") from err_msg
+
+        ids = []
+        for rr_record in rr_records:
+            rdict = rr_to_dict(rr_record)
+            id_ = self.add_record.append(category, scope, rtype, rname, rdata, ttl)
+            ids.append(id_)
+
+        return ids
+                
 
     def export_zone_file(self, outfile, category):
         """ Export records to a DNS zonefile
@@ -87,7 +118,7 @@ class DNSRecordList(object):
     def add_record(self, category, scope, rtype, rname, rdata, ttl):
         """ Adds a new record
         """
-        id_ = len(self.records) + 1
+        id_ = len(self.records["all"]) + 1
         while self.search_by_id(id_) is not None:
             id_ += 1
         record = {
@@ -96,7 +127,8 @@ class DNSRecordList(object):
             "scope": scope,
             "rtype": rtype,
             "rname": rname,
-            "rdata": rdata
+            "rdata": rdata,
+            "ttl": ttl
         }
         rr = dict_to_rr(record)
         record["rr"] = rr
@@ -181,7 +213,6 @@ class DNSResolver(object):
         if self.dns_records["by_category"]["override"]:
             exact_matches = []
             wildcard_matches = []
-            matching_records = []
             for record in self.dns_records["by_category"]["override"]:
                 # Continue to the next record unless record is globally scoped or scoped to the client's IP
                 if record["scope"] != "global":
@@ -194,7 +225,6 @@ class DNSResolver(object):
                     exact_matches.append(rr)
                 elif wildcard_match(qname, normalize(str(rr.rname))):
                     wildcard_matches.append(rr)
-                matching_records.append(record["id"])
             matches = exact_matches or wildcard_matches
             if matches:
                 for rr in matches:
@@ -204,7 +234,8 @@ class DNSResolver(object):
 
         # Resolve with zone records
         if self.dns_records["by_category"]["zone"]:
-            for rr in self.dns_records["by_category"]["zone"]:
+            for record in self.dns_records["by_category"]["zone"]:
+                rr = record["rr"]
                 if qtype in (QTYPE[rr.rtype], "ANY") and qname == normalize(str(rr.rname)):
                     reply.add_answer(rr)
                     reply.header.aa = 1
@@ -220,9 +251,6 @@ class DNSResolver(object):
             except Exception as err_msg:
                 self.logger.error(f"Got error resolving query through upstream server: {err_msg}")\
                 continue
-
-        
-        
 
 class DNSServer(object):
     """ DNS server backend
@@ -327,20 +355,20 @@ class DNSServer(object):
             raise err_msg
         return None
 
-    def _ImportZoneFile(self, infile, category):
+    def _ImportZoneFile(self, infile, category, scope):
         """ Import DNS records from a zonefile
         """
         try:
-            ids = self.dns_records.import_zone_file(infile, category)
+            ids = self.dns_records.import_zone_file(infile, category, scope)
         except Exception as err_msg:
             raise err_msg
         return ids
 
-    def _ExportZoneFile(self, outfile, category):
+    def _ExportZoneFile(self, outfile, category, scope):
         """ Export DNS records to a zonefile
         """
         try:
-            self.dns_records.export_zone_file(outfile, category)
+            self.dns_records.export_zone_file(outfile, category, scope)
         except Exception as err_msg:
             raise err_msg
         return None

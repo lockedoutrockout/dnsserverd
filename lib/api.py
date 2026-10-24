@@ -32,11 +32,13 @@ INTERFACE_XML = """
         <method name="ImportZoneFile">
             <arg name="infile" type="s" direction="in"/>
             <arg name="category" type="s" direction="in"/>
+            <arg name="scope" type="s" direction="in"/>
             <arg name="ids" type="ai" direction="out"/>
         </method>
         <method name="ExportZoneFile">
             <arg name="outfile" type="s" direction="in"/>
             <arg name="category" type="s" direction="in"/>
+            <arg name="scope" type="s" direction="in"/>
         </method>
         <method name="AddDNSRecord">
             <arg name="category" type="s" direction="in"/>
@@ -55,6 +57,7 @@ INTERFACE_XML = """
         <!-- Properties -->
         <!-- Read Only -->
         <property name="State" type="s" access="read"/>
+        <property name="ZoneRecords" type="aa{sv}" access="read"/>
         <property name="OverrideRecords" type="aa{sv}" access="read"/>
         <property name="DoHBlocklist" type="as" access="read"/>
         <!-- Read/Write -->
@@ -84,9 +87,10 @@ INTERFACE_XML = """
             <arg type="as" name="old_blocklist"/>
             <arg type="as" name="new_blocklist"/>
         </signal>
-        <signal name="OverrideRecordsUpdated">
+        <signal name="DNSRecordsUpdated">
             <arg type="s" name="action"/>
-            <arg type="a{sv}" name="override_record"/>
+            <arg type="s" name="category"/>
+            <arg type="a{sv}" name="record"/>
         </signal>
     </interface>
 </node>
@@ -109,7 +113,7 @@ class DNSServerService(datatypes.DNSServer):
     ConfigurationChanged = signal()
     ConfigurationApplied = signal()
     DoHBlocklistUpdated = signal()
-    OverrideRecordsUpdated = signal()
+    DNSRecordsUpdated = signal()
 
     def __init__(self):
         self.version = "0.1"
@@ -196,24 +200,24 @@ class DNSServerService(datatypes.DNSServer):
     def AddDNSRecord(self, category, scope, rtype, rname, rdata, ttl):
         """ Add a new DNS record
         """
-        self.logger.info(f"DBus API got call to AddDNSOverride")
+        self.logger.info(f"DBus API got call to AddDNSRecord")
         try:
-            record = self._AddDNSOverride(scope, qtype, qname, rtype, rdata)
-            self.OverrideRecordsUpdated("add", record)
+            record = self._AddDNSRecord(category, scope, rtype, rname, rdata, ttl)
+            self.DNSRecordsUpdated("add", category, record)
         except Exception as err_msg:
-            self.logger.error(f"DBus API encountered an exception during call to AddDNSOverride: {err_msg}")
+            self.logger.error(f"DBus API encountered an exception during call to AddDNSRecord: {err_msg}")
             raise err_msg
         return record[0]
 
     def RemoveDNSRecord(self, id_):
         """ Remove an existing DNS record
         """
-        self.logger.info(f"DBus API got call to RemoveDNSOverride")
+        self.logger.info(f"DBus API got call to RemoveDNSRecord")
         try:
-            record = self._RemoveDNSOverride(id_)
-            self.OverrideRecordsUpdated("remove", record)
+            record = self._RemoveDNSRecord(id_)
+            self.DNSRecordsUpdated("remove", record["category"], record)
         except Exception as err_msg:
-            self.logger.error(f"DBus API encountered an exception during call to RemoveDNSOverride: {err_msg}")
+            self.logger.error(f"DBus API encountered an exception during call to RemoveDNSRecord: {err_msg}")
             raise err_msg
         return None
         
@@ -223,8 +227,12 @@ class DNSServerService(datatypes.DNSServer):
         return self.state
 
     @property
+    def ZoneRecords(self):
+        return self.dns_records["by_category"]["zone"]
+
+    @property
     def OverrideRecords(self):
-        return self.override_records
+        return self.dns_records["by_category"]["override"]
 
     @property
     def DoHBlocklist(self):

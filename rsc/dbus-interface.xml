@@ -34,6 +34,7 @@
         <!-- Properties -->
         <!-- Read Only -->
         <property name="State" type="s" access="read"/>
+        <property name="ZoneRecords" type="aa{sv}" access="read"/>
         <property name="OverrideRecords" type="aa{sv}" access="read"/>
         <property name="DoHBlocklist" type="as" access="read"/>
         <!-- Read/Write -->
@@ -63,9 +64,10 @@
             <arg type="as" name="old_blocklist"/>
             <arg type="as" name="new_blocklist"/>
         </signal>
-        <signal name="OverrideRecordsUpdated">
+        <signal name="DNSRecordsUpdated">
             <arg type="s" name="action"/>
-            <arg type="a{sv}" name="override_record"/>
+            <arg type="s" name="category"/>
+            <arg type="a{sv}" name="record"/>
         </signal>
     </interface>
 </node>
