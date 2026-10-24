@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 import socket
+from pathlib import Path
 from dnslib import DNSRecord, QTYPE, RR, A, ZoneParser
 from dnslib.server import DNSServer as DNSLibDNSServer
 from dnslib.server import DNSHandler, BaseResolver
@@ -60,159 +61,56 @@ def resolve_host(host):
     except socket.gaierror as err_msg:
         raise err_msg
 
-class DoHBlocklist(self):
+class DoHBlocklist(object):
     """ DNS-over-HTTPS host blocklist
     """
-    def __init__(self):
+    def __init__(self, config=None, logger=None):
         self.doh_blocklist = []
+        self.update_thread = None
         self.is_updating = False
+        self.doh_hosts_file = self.config["EXPLOITATION"]["doh_hosts_filepath"]
+        if "~" in self.doh_hosts_file:
+            self.doh_hosts_file = os.path.expanduser(self.doh_hosts_file)
+        if os.path.isfile(self.doh_hosts_file):
+            with open(self.doh_hosts_file, "r") as fd:
+                hosts = []
+                for line in fd.readlines():
+                    hosts.append(line.strip())
+            self.update_doh_blocklist(hosts)
+            if self.is_updating:
+                self.update_thread.join()
+        else:
+            Path(self.doh_hosts_file).touch()
 
-    def update_doh_blocklist(self, hosts):
+    def update_doh_blocklist(self, hosts, append):
         """ Update the DoH blocklist
         """
-        doh_blocklist = []
-        for host in hosts:
-            try:
-                doh_blocklist.append((host, resolve_host(host)))
-            except Exception as err_msg:
-                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while updating the DoH blocklist") from err_msg
-        self.doh_blocklist.clear()
-        self.doh_blocklist.extend(doh_blocklist)
+        def _update_thread(hosts):
+            """ DoH blocklist updater thread
+            """
+            self.is_updating = True
+            doh_blocklist = []
+            for host in hosts:
+                try:
+                    doh_blocklist.append((host, resolve_host(host)))
+                except Exception as err_msg:
+                    raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while updating the DoH blocklist") from err_msg
+            if not append:
+                self.doh_blocklist.clear()
+            self.doh_blocklist.extend(doh_blocklist)
+            self.is_updating = False
+            return None
 
-class DNSFirewall(object):
-    """ Handles tasks related to enforcing use of the DNS server
-    by network clients
-    """
-    def __init__(self, settings, config=None, logger=None):
-        self.config = config
-        self.logger = logger
-        self.settings = settings
-        self.dns_redirection(self.settings["RedirectDNSTraffic"])
-        self.quic_blocking(self.settings["BlockQUIC"])
-        self.doh_blocking(self.settings["BlockDoH"])
-
+        self.update_thread = threading.Thread(target=_update_thread, args=(hosts,), daemon=True)
+        self.update_thread.start()
         return None
-
-    def dns_redirection(self, enable):
-        """ Enable/disable DNS traffic redirection
-        """
-        if enable:
-            try:
-                pass
-            except Exception as err_msg:
-                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while enabling DNS traffic redirection") from err_msg
-        else:
-            try:
-                pass
-            except Exception as err_msg:
-                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while disabling DNS traffic redirection") from err_msg
-        return None
-
-    def quic_blocking(self, enable):
-        """ Block/unblock QUIC traffic
-        """
-        if enable:
-            try:
-                subprocess.run([
-                    "iptables",
-                    "-A",
-                    "FORWARD",
-                    "-i",
-                    self.config["SERVER"]["interface"],
-                    "-p",
-                    "udp",
-                    "--dport",
-                    "443",
-                    "-j",
-                    "DROP"
-                ])
-                self.quic_blocking_enabled = True
-            except Exception as err_msg:
-                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while enabling QUIC traffic blocking") from err_msg
-        else:
-            try:
-                subprocess.run([
-                    "iptables",
-                    "-A",
-                    "FORWARD",
-                    "-i",
-                    self.config["SERVER"]["interface"],
-                    "-p",
-                    "udp",
-                    "--dport",
-                    "443",
-                    "-j",
-                    "DROP"
-                ])
-                self.quic_blocking_enabled = False
-            except Exception as err_msg:
-                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while disabling QUIC traffic blocking") from err_msg
-        return None
-
-    def doh_blocking(self, enable):
-        """ Block/unblock DNS-over-HTTPS traffic
-        """
-        if enable:
-            try:
-                for host in self.doh_blocklist:
-                    subprocess.run([
-                        "ipset",
-                        "add",
-                        "doh_blocklist",
-                        host[1]
-                    ])
-                subprocess.run([
-                    "iptables",
-                    "-A",
-                    "OUTPUT",
-                    "-p",
-                    "tcp",
-                    "-m",
-                    "set",
-                    "--match-set",
-                    "doh_blocklist",
-                    "dst",
-                    "--dport",
-                    "443",
-                    "-j",
-                    "DROP"
-                ])
-                self.doh_blocking_enabled = True
-            except Exception as err_msg:
-                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while enabling DoH blocking") from err_msg
-        else:
-            try:
-                subprocess.run([
-                    "iptables",
-                    "-D",
-                    "OUTPUT",
-                    "-p",
-                    "tcp",
-                    "-m",
-                    "set",
-                    "--match-set",
-                    "doh_blocklist",
-                    "dst",
-                    "--dport",
-                    "443",
-                    "-j",
-                    "DROP"
-                ])
-                subprocess.run([
-                    "ipset",
-                    "flush",
-                    "doh_blocklist"
-                ])
-                self.doh_blocking_enabled = False
-            except Exception as err_msg:
-                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while disabling DoH blocking") from err_msg
-                
-        
 
 class DNSRecordList(object):
     """ A categorized and sorted master list of DNS records
     """
-    def __init__(self):
+    def __init__(self, config=None, logger=None):
+        self.config = config
+        self.logger = logger
         self.records = {
             "all": [],
             "by_category": {
@@ -235,6 +133,25 @@ class DNSRecordList(object):
             "by_rdata": {},
             "by_ttl": {}
         }
+        self.zone_records_file = self.config["DNS"]["zone_records_filepath"]
+        if "~" in self.zone_records_file:
+            self.zone_records_file = os.path.expanduser(self.zone_records_file)
+        if os.path.isfile(self.zone_records_file):
+            self.import_zone_file(self.zone_records_file, "zone", "global")
+        else:
+            self.gen_dns_zonefile(self.zone_records_file)
+        self.override_records_file = self.config["EXPLOITATION"]["override_records_filepath"]
+        if "~" in self.override_records_file:
+            self.override_records_file = os.path.expanduser(self.override_records_file)
+        if os.path.isfile(self.override_records_file):
+            self.import_zone_file(self.override_records_file, "override", "global")
+        else:
+            Path(self.override_records_file).touch()
+
+    def gen_dns_zonefile(self, outfile):
+        """ Generate a zonefile for the local DNS zone
+        """
+        pass
 
     def search_by_id(self, id_):
         """ Get record by its ID
@@ -273,7 +190,6 @@ class DNSRecordList(object):
             ids.append(id_)
 
         return ids
-                
 
     def export_zone_file(self, outfile, category, scope):
         """ Export records to a DNS zonefile
@@ -354,6 +270,208 @@ class DNSRecordList(object):
         self.records["by_ttl"][record["ttl"]].remove(record)
 
         return record
+
+class DNSFirewall(object):
+    """ Handles tasks related to enforcing use of the DNS server
+    by network clients
+    """
+    def __init__(self, settings, config=None, logger=None):
+        self.config = config
+        self.logger = logger
+        self.settings = settings
+        self.dns_redirection(self.settings["RedirectDNSTraffic"])
+        self.quic_blocking(self.settings["BlockQUIC"])
+        self.doh_blocking(self.settings["BlockDoH"])
+
+        return None
+
+    def dns_redirection(self, enable):
+        """ Enable/disable DNS traffic redirection
+        """
+        if enable:
+            try:
+                subprocess.run([
+                    "iptables",
+                    "-t",
+                    "nat",
+                    "-A",
+                    "PREROUTING",
+                    "-i",
+                    self.config["SERVER"]["interface"],
+                    "-p",
+                    "udp",
+                    "--dport",
+                    "53",
+                    "-j",
+                    "DNAT",
+                    "--to-destination",
+                    f"{self.settings['DNSRedirectTargetIP']}:53")
+                ])
+                subprocess.run([
+                    "iptables",
+                    "-t",
+                    "nat",
+                    "-A",
+                    "PREROUTING",
+                    "-i",
+                    self.config["SERVER"]["interface"],
+                    "-p",
+                    "tcp",
+                    "--dport",
+                    "53",
+                    "-j",
+                    "DNAT",
+                    "--to-destination",
+                    f"{self.settings['DNSRedirectTargetIP']}:53")
+                ])
+            except Exception as err_msg:
+                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while enabling DNS traffic redirection") from err_msg
+        else:
+            try:
+                subprocess.run([
+                    "iptables",
+                    "-t",
+                    "nat",
+                    "-D",
+                    "PREROUTING",
+                    "-i",
+                    self.config["SERVER"]["interface"],
+                    "-p",
+                    "udp",
+                    "--dport",
+                    "53",
+                    "-j",
+                    "DNAT",
+                    "--to-destination",
+                    f"{self.settings['DNSRedirectTargetIP']}:53")
+                ])
+                subprocess.run([
+                    "iptables",
+                    "-t",
+                    "nat",
+                    "-D",
+                    "PREROUTING",
+                    "-i",
+                    self.config["SERVER"]["interface"],
+                    "-p",
+                    "tcp",
+                    "--dport",
+                    "53",
+                    "-j",
+                    "DNAT",
+                    "--to-destination",
+                    f"{self.settings['DNSRedirectTargetIP']}:53")
+                ])
+            except Exception as err_msg:
+                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while disabling DNS traffic redirection") from err_msg
+        return None
+
+    def quic_blocking(self, enable):
+        """ Block/unblock QUIC traffic
+        """
+        if enable:
+            try:
+                subprocess.run([
+                    "iptables",
+                    "-A",
+                    "FORWARD",
+                    "-i",
+                    self.config["SERVER"]["interface"],
+                    "-p",
+                    "udp",
+                    "--dport",
+                    "443",
+                    "-j",
+                    "DROP"
+                ])
+                self.quic_blocking_enabled = True
+            except Exception as err_msg:
+                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while enabling QUIC traffic blocking") from err_msg
+        else:
+            try:
+                subprocess.run([
+                    "iptables",
+                    "-D",
+                    "FORWARD",
+                    "-i",
+                    self.config["SERVER"]["interface"],
+                    "-p",
+                    "udp",
+                    "--dport",
+                    "443",
+                    "-j",
+                    "DROP"
+                ])
+                self.quic_blocking_enabled = False
+            except Exception as err_msg:
+                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while disabling QUIC traffic blocking") from err_msg
+        return None
+
+    def doh_blocking(self, enable):
+        """ Block/unblock DNS-over-HTTPS traffic
+        """
+        if enable:
+            try:
+                subprocess.run([
+                    "ipset",
+                    "create",
+                    "doh_blocklist",
+                    "hash:ip"
+                ])
+                for host in self.doh_blocklist:
+                    subprocess.run([
+                        "ipset",
+                        "add",
+                        "doh_blocklist",
+                        host[1]
+                    ])
+                subprocess.run([
+                    "iptables",
+                    "-A",
+                    "FORWARD",
+                    "-i",
+                    self.config["SERVER"]["interface"],
+                    "-p",
+                    "tcp",
+                    "-m",
+                    "set",
+                    "--match-set",
+                    "doh_blocklist",
+                    "dst",
+                    "--dport",
+                    "443",
+                    "-j",
+                    "DROP"
+                ])
+                self.doh_blocking_enabled = True
+            except Exception as err_msg:
+                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while enabling DoH blocking") from err_msg
+        else:
+            try:
+                subprocess.run([
+                    "iptables",
+                    "-D",
+                    "OUTPUT",
+                    "-p",
+                    "tcp",
+                    "-m",
+                    "set",
+                    "--match-set",
+                    "doh_blocklist",
+                    "dst",
+                    "--dport",
+                    "443",
+                    "-j",
+                    "DROP"
+                ])
+                subprocess.run([
+                    "ipset",
+                    "flush",
+                    "doh_blocklist"
+                ])
+                self.doh_blocking_enabled = False
+            except Exception as err_msg:
+                raise exceptions.DNSFirewallError(f"Encountered an unexpected exception while disabling DoH blocking") from err_msg
 
 class DNSResolver(object):
     """ Custom DNS resolver
@@ -443,10 +561,10 @@ class DNSServer(object):
         self.logger = logger
         self.processes = {}
         self.state = "not running"
-        self.dns_records = DNSRecordList()
-        self.doh_blocklist = [] 
+        self.dns_records = DNSRecordList(config=self.config, logger=self.logger)
+        self.doh_blocklist = DoHBlocklist(config=self.config, logger=self.logger) 
         self.settings = {
-            "UseTCP": self.config.getboolean("DNS", "use_tcp"),
+            "UseTCP": self.config.getboolean("SERVER", "use_tcp"),
             "PrimaryUpstream": self.config["DNS"]["primary_upstream"],
             "BackupUpstream": self.config["DNS"]["backup_upstream"],
             "DNSRedirectTargetIP": self.config["EXPLOITATION"]["dns_redirect_target_ip"],
@@ -523,17 +641,11 @@ class DNSServer(object):
             raise err_msg
         return None
 
-    def _UpdateDoHBlocklist(self, doh_blocklist):
+    def _UpdateDoHBlocklist(self, hosts, append):
         """ Update the DoH host blocklist
         """
         try:
-            updated = []
-            for host in doh_blocklist:
-                if host in updated:
-                    continue
-                updated.append(host)
-            self.doh_blocklist.clear()
-            self.doh_blocklist.extend(updated)
+            self.doh_blocklist.update_doh_blocklist(hosts, append)
         except Exception as err_msg:
             raise err_msg
         return None

@@ -28,6 +28,7 @@ INTERFACE_XML = """
         <method name="ApplyConfiguration"/>
         <method name="UpdateDoHBlocklist">
             <arg name="hosts" type="as" direction="in"/>
+            <arg name="append" type="b" direction="in"/>
         </method>
         <method name="ImportZoneFile">
             <arg name="infile" type="s" direction="in"/>
@@ -174,28 +175,43 @@ class DNSServerService(datatypes.DNSServer):
             self.logger.error(f"DBus API encountered an exception during call to Apply: {err_msg}")
         return None
 
-    def UpdateDoHBlocklist(self, hosts):
+    def UpdateDoHBlocklist(self, hosts, append):
         """ Update the DNS-over-HTTPS host blocklist
         """
         self.logger.info(f"DBus API got call to UpdateDoHBlocklist")
         try:
-            _old = self.doh_blocklist
-            self._UpdateDoHBlocklist(doh_blocklist)
-            self.DoHBlocklistUpdated(_old, self.doh_blocklist)
+            _old = self.doh_blocklist.doh_blocklist
+            self._UpdateDoHBlocklist(hosts, append)
+            if self.doh_blocklist.is_updating:
+                self.doh_blocklist.update_thread.join()
+            self.DoHBlocklistUpdated(_old, self.doh_blocklist.doh_blocklist)
         except Exception as err_msg:
             self.logger.error(f"DBus API encountered an exception during call to UpdateDoHBlocklist: {err_msg}")
             raise err_msg
         return None
 
-    def ImportZoneFile(self, infile, category):
+    def ImportZoneFile(self, infile, category, scope):
         """ Import DNS records of the specified category from a zonefile
         """
-        pass
+        self.logger.info(f"DBus API got call to ImportZoneFile")
+        try:
+            ids = self.dns_records.import_zone_file(infile, category, scope)
+        except Exception as err_msg:
+            self.logger.error(f"DBus API encountered an exception during call to ImportZoneFile: {err_msg}")
+            raise err_msg
+        return None
+            
 
-    def ExportZoneFile(self, outfile, category):
+    def ExportZoneFile(self, outfile, category, scope):
         """ Export the records for a given category to a zonefile
         """
-        pass
+        self.logger.info(f"DBus API got call to ExportZoneFile")
+        try:
+            self.dns_records.export_zone_file(infile, category, scope)
+        except Exception as err_msg:
+            self.logger.error(f"DBus API encountered an exception during call to ExportZoneFile: {err_msg}")
+            raise err_msg
+        return None
 
     def AddDNSRecord(self, category, scope, rtype, rname, rdata, ttl):
         """ Add a new DNS record
@@ -236,7 +252,9 @@ class DNSServerService(datatypes.DNSServer):
 
     @property
     def DoHBlocklist(self):
-        return self.doh_blocklist
+        if self.doh_blocklist.is_updating:
+            self.doh_blocklist.update_thread.join()
+        return self.doh_blocklist.
 
     @property
     def UseTCP(self):

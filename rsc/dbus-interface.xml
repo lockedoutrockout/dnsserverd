@@ -6,16 +6,19 @@
         <method name="Restart"/>
         <method name="ApplyConfiguration"/>
         <method name="UpdateDoHBlocklist">
-            <arg name="doh_blocklist" type="as" direction="in"/>
+            <arg name="hosts" type="as" direction="in"/>
+            <arg name="append" type="b" direction="in"/>
         </method>
         <method name="ImportZoneFile">
             <arg name="infile" type="s" direction="in"/>
             <arg name="category" type="s" direction="in"/>
+            <arg name="scope" type="s" direction="in"/>
             <arg name="ids" type="ai" direction="out"/>
         </method>
         <method name="ExportZoneFile">
             <arg name="outfile" type="s" direction="in"/>
             <arg name="category" type="s" direction="in"/>
+            <arg name="scope" type="s" direction="in"/>
         </method>
         <method name="AddDNSRecord">
             <arg name="category" type="s" direction="in"/>
